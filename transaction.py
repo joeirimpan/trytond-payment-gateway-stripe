@@ -7,6 +7,7 @@
 """
 import stripe
 
+from trytond.transaction import Transaction
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Eval, Bool, Not
 from trytond.model import fields
@@ -183,6 +184,11 @@ class PaymentTransactionStripe:
             'amount': int(self.amount * 100),
             'currency': self.currency.code.lower(),
         }
+
+        if Transaction().context.get('order_number'):
+            charge_data['metadata'] = {
+                'order_number': Transaction().context.get('order_number'),
+            }
 
         if card_info:
             charge_data['source'] = {

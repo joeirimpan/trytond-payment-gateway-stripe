@@ -5,7 +5,9 @@
     :copyright: (C) 2015 by Fulfil.IO Inc.
     :license: see LICENSE for more details.
 """
+import json
 from decimal import Decimal
+from uuid import uuid4
 
 import stripe
 import pytest
@@ -397,3 +399,49 @@ class TestPaymentGateway:
         assert payment_profile.expiry_month == '09'
         assert payment_profile.expiry_year == '2020'
         assert payment_profile.stripe_customer_id is not None
+
+    def test_send_metadata_capture_and_auth(self, dataset, transaction):
+        """Test capture transaction
+        """
+        PaymentTransaction = self.POOL.get('payment_gateway.transaction')
+
+        data = dataset()
+
+        payment_profile = self.create_payment_profile(
+            data.customer, data.stripe_gateway
+        )
+        transaction1, = PaymentTransaction.create([{
+            'party': data.customer.id,
+            'credit_account': data.customer.account_receivable.id,
+            'address': data.customer.addresses[0].id,
+            'payment_profile': payment_profile.id,
+            'gateway': data.stripe_gateway.id,
+            'amount': 100,
+        }])
+        assert transaction1.state == 'draft'
+
+        with Transaction().set_context(order_number=str(uuid4())[:20]):
+            PaymentTransaction.capture([transaction1])
+
+        assert transaction1.state == 'posted'
+        assert len(transaction1.logs) > 0
+        charge = json.loads(transaction1.logs[0].log)
+        assert charge['metadata']['order_number'] is not None
+
+        transaction2, = PaymentTransaction.create([{
+            'party': data.customer.id,
+            'credit_account': data.customer.account_receivable.id,
+            'address': data.customer.addresses[0].id,
+            'payment_profile': payment_profile.id,
+            'gateway': data.stripe_gateway.id,
+            'amount': 100,
+        }])
+        assert transaction2.state == 'draft'
+
+        with Transaction().set_context(order_number=str(uuid4())[:20]):
+            PaymentTransaction.authorize([transaction2])
+
+        assert transaction2.state == 'authorized'
+        assert len(transaction2.logs) > 0
+        charge = json.loads(transaction2.logs[0].log)
+        assert charge['metadata']['order_number'] is not None
